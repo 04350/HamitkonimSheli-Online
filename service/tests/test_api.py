@@ -1,6 +1,9 @@
 import io
 import sys
 import unittest
+import shutil
+
+import fitz
 from pathlib import Path
 from unittest.mock import patch
 
@@ -70,6 +73,22 @@ class ProcessingApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.headers.get("content-type"), "application/pdf")
         self.assertTrue(response.content.startswith(b"%PDF"))
+
+    @unittest.skipUnless(shutil.which("libreoffice") or shutil.which("soffice"), "LibreOffice is not installed")
+    def test_real_rtf_conversion_returns_valid_pdf(self):
+        rtf = (
+            r"{\rtf1\ansi\deff0{\fonttbl{\f0 Liberation Sans;}}"
+            r"\f0\fs28 HYBRID OFFICE CONVERSION TEST}"
+        ).encode("ascii")
+        response = self.client.post(
+            "/api/v1/office/convert",
+            files={"file": ("hybrid-test.rtf", rtf, "application/rtf")},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.content.startswith(b"%PDF"))
+        with fitz.open(stream=response.content, filetype="pdf") as converted:
+            self.assertGreaterEqual(converted.page_count, 1)
+            self.assertIn("HYBRID OFFICE CONVERSION TEST", converted[0].get_text())
 
     def test_office_extension_is_validated(self):
         response = self.client.post(

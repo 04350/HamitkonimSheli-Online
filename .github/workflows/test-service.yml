@@ -30,16 +30,78 @@ jobs:
         env:
           PYTHONPATH: src:service
         run: python -m unittest discover -s service/tests -v
-      - name: בדיקת שפות ומנועי עיבוד
+      - name: בדיקת זמינות מנועי OCR ו-Office
         env:
           PYTHONPATH: src:service
         run: |
           python - <<'PY'
           import pytesseract
+          import app
           langs = set(pytesseract.get_languages(config=""))
           assert {"heb", "eng"}.issubset(langs), langs
-          import app
           result = app.health()
-          assert result["status"] == "ok" and result["ocr"] and result["office"]
+          assert result["status"] == "ok" and result["ocr"] and result["office"], result
           print("Hebrew/English OCR and Office engines are available.")
+          PY
+      - name: בדיקת OCR אמיתית בעברית ובאנגלית דרך ה-API
+        env:
+          PYTHONPATH: src:service
+        run: |
+          python - <<'PY'
+          import io
+          import subprocess
+          from pathlib import Path
+          from fastapi.testclient import TestClient
+          from PIL import Image, ImageDraw, ImageFont
+          import app
+
+          def font_for(family, fallback):
+              try:
+                  path = subprocess.check_output(
+                      ["fc-match", "-f", "%{file}", family], text=True
+                  ).strip()
+                  if path and Path(path).is_file():
+                      return ImageFont.truetype(path, 92)
+              except Exception:
+                  pass
+              for path in fallback:
+                  if Path(path).is_file():
+                      return ImageFont.truetype(path, 92)
+              raise SystemExit("A suitable test font was not found.")
+
+          english_font = font_for("Liberation Sans", [
+              "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+              "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+          ])
+          hebrew_font = font_for("Noto Sans Hebrew", [
+              "/usr/share/fonts/truetype/noto/NotoSansHebrew-Regular.ttf",
+              "/usr/share/fonts/truetype/noto/NotoSansHebrew-VF.ttf",
+          ])
+          client = TestClient(app.app)
+
+          def recognize(image, name):
+              buffer = io.BytesIO()
+              image.save(buffer, format="PNG")
+              response = client.post(
+                  "/api/v1/ocr/image",
+                  files={"file": (name, buffer.getvalue(), "image/png")},
+              )
+              assert response.status_code == 200, response.text
+              return response.json()["text"]
+
+          image = Image.new("RGB", (1500, 260), "white")
+          ImageDraw.Draw(image).text((60, 55), "APPLE RECIPE", fill="black", font=english_font)
+          english = recognize(image, "english.png").upper()
+          assert "APPLE" in english, f"English OCR did not recognize APPLE: {english!r}"
+
+          image = Image.new("RGB", (1500, 260), "white")
+          draw = ImageDraw.Draw(image)
+          try:
+              draw.text((1420, 55), "עוגת תפוחים", fill="black", font=hebrew_font, direction="rtl", anchor="rt")
+          except (TypeError, ValueError):
+              draw.text((60, 55), "עוגת תפוחים"[::-1], fill="black", font=hebrew_font)
+          hebrew = recognize(image, "hebrew.png")
+          hebrew_count = sum(1 for char in hebrew if "\u05d0" <= char <= "\u05ea")
+          assert hebrew_count >= 5, f"Hebrew OCR did not recognize enough letters: {hebrew!r}"
+          print(f"Actual API OCR passed: English APPLE and {hebrew_count} Hebrew letters.")
           PY
