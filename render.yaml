@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: hamitkonimsheli-online-api
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./service/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: MAX_UPLOAD_MB
+        value: "20"
+      - key: PYTHONUNBUFFERED
+        value: "1"

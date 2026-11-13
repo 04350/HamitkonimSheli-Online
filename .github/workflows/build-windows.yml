@@ -1,0 +1,85 @@
+name: בניית תוכנת Windows ההיברידית
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'assets/**'
+      - '.github/workflows/build-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: התקנת Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: התקנת ספריות
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install PyMuPDF==1.26.7 python-docx striprtf pillow tkinterdnd2 openpyxl python-pptx pyinstaller
+      - name: בדיקות קוד ויחידה
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "src"
+          python -m py_compile "src/ספריית_המתכונים.py" src/cloud_client.py src/recipe_center.py src/recipe_scanner.py
+          python -m unittest discover -s tests -v
+      - name: יצירת אייקון
+        run: python assets/create_icon.py
+      - name: יצירת EXE
+        run: >
+          pyinstaller --noconfirm --clean --onefile --windowed
+          --icon "assets/app_icon.ico"
+          --add-data "assets/app_icon.ico;assets"
+          --name "ספריית_המתכונים_שלי_Online"
+          --collect-all fitz
+          --collect-all PIL
+          --collect-all tkinterdnd2
+          --hidden-import striprtf.striprtf
+          --hidden-import docx
+          --hidden-import cloud_client
+          "src/ספריית_המתכונים.py"
+      - name: בדיקת EXE והפעלה
+        shell: pwsh
+        run: |
+          $exe = "dist/ספריית_המתכונים_שלי_Online.exe"
+          if (!(Test-Path $exe)) { throw "קובץ ההפעלה לא נוצר" }
+          if ((Get-Item $exe).Length -lt 5000000) { throw "קובץ ההפעלה קטן מהצפוי" }
+          $process = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 8
+          $process.Refresh()
+          if ($process.HasExited) { throw "התוכנה נסגרה מיד לאחר ההפעלה" }
+          taskkill /PID $process.Id /T /F | Out-Null
+      - name: יצירת חבילת התקנה
+        shell: pwsh
+        run: |
+          $root = "dist/חבילת-ספריית-המתכונים-Online"
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          Copy-Item "dist/ספריית_המתכונים_שלי_Online.exe" "$root/"
+          @'
+          ספריית המתכונים שלי — Hybrid Online
+          1. חלצו את קובץ ה-ZIP לתיקייה.
+          2. הפעילו את ספריית_המתכונים_שלי_Online.exe.
+          3. בהגדרות התוכנה בדקו את כתובת שירות העיבוד המקוון.
+          המתכונים, מסד הנתונים וקובצי המקור נשמרים במחשב.
+          סריקת OCR והמרת מסמכי Office שולחות לשרת רק את הקובץ שנבחר לפעולה.
+          פעולות אלה דורשות חיבור לאינטרנט.
+          '@ | Set-Content -Encoding UTF8 "$root/קראו-לפני-הפעלה.txt"
+          Compress-Archive -Path "$root/*" -DestinationPath "dist/ספריית-המתכונים-שלי-Online-Windows.zip" -CompressionLevel Optimal
+          if (!(Test-Path "dist/ספריית-המתכונים-שלי-Online-Windows.zip")) { throw "חבילת ZIP לא נוצרה" }
+          Write-Host "Package bytes: $((Get-Item 'dist/ספריית-המתכונים-שלי-Online-Windows.zip').Length)"
+      - name: העלאת חבילת Windows
+        uses: actions/upload-artifact@v4
+        with:
+          name: HamitkonimSheli-Online-Windows
+          path: dist/ספריית-המתכונים-שלי-Online-Windows.zip
+          if-no-files-found: error
+          retention-days: 30
