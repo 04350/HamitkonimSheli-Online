@@ -14,7 +14,7 @@ from typing import Deque
 
 import pytesseract
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.background import BackgroundTask
+from starlette.background import BackgroundTask
 from fastapi.responses import FileResponse, JSONResponse
 from PIL import Image, UnidentifiedImageError
 
