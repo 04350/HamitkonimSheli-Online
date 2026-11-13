@@ -496,7 +496,7 @@ class בדיקותספרייה(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory() as temp:
                 os.environ["LOCALAPPDATA"] = temp
-                home = Path(temp) / app.APP_NAME
+                home = Path(temp) / (app.APP_NAME + " Online")
                 home.mkdir(parents=True)
                 (home / "הקבצים שלי").mkdir()
                 db_path = home / "הספרייה.sqlite3"
