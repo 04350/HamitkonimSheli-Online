@@ -143,3 +143,37 @@ jobs:
           path: dist/recipe-library-real-ui.png
           if-no-files-found: error
           retention-days: 30
+
+  publish-release:
+    name: פרסום גרסה להורדה
+    needs: [build-windows, capture-screenshot]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: הורדת חבילת Windows שנבדקה
+        uses: actions/download-artifact@v4
+        with:
+          name: HamitkonimSheli-Online-Windows
+          path: release-files
+      - name: בדיקת קובץ החבילה
+        run: |
+          test -s release-files/ספריית-המתכונים-שלי-Online-Windows.zip
+          ls -lh release-files/ספריית-המתכונים-שלי-Online-Windows.zip
+      - name: פרסום GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          name: ספריית המתכונים שלי – Hybrid Online 1.0.0
+          target_commitish: main
+          draft: false
+          prerelease: false
+          overwrite_files: true
+          generate_release_notes: false
+          body: |
+            גרסת Windows היברידית: ספריית המתכונים נשמרת מקומית במחשב, ופעולות OCR והמרת Office מתבצעות דרך שירות עיבוד מקוון.
+
+            **הורדה:** חלצו את קובץ ה-ZIP והפעילו את קובץ ה-EXE.
+
+            **חשוב:** יש לפרוס את שירות העיבוד לפי README.md, לוודא שהכתובת נגישה ולבדוק אותה מתוך נטפרי לפני שימוש בסריקה ובהמרת Office.
+          files: release-files/ספריית-המתכונים-שלי-Online-Windows.zip
