@@ -50,6 +50,27 @@ class ProcessingApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+
+    @patch("app.subprocess.run")
+    @patch("app.shutil.which", return_value="/usr/bin/libreoffice")
+    def test_office_conversion_returns_pdf(self, _which, mocked_run):
+        pdf_bytes = b"%PDF-1.4\n" + (b"test-pdf-data\n" * 20)
+        def fake_run(command, **kwargs):
+            output_dir = Path(command[command.index("--outdir") + 1])
+            (output_dir / "input.pdf").write_bytes(pdf_bytes)
+            class Completed:
+                stdout = ""
+                stderr = ""
+            return Completed()
+        mocked_run.side_effect = fake_run
+        response = self.client.post(
+            "/api/v1/office/convert",
+            files={"file": ("recipe.docx", b"fake-docx-data", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.headers.get("content-type"), "application/pdf")
+        self.assertTrue(response.content.startswith(b"%PDF"))
+
     def test_office_extension_is_validated(self):
         response = self.client.post(
             "/api/v1/office/convert",
