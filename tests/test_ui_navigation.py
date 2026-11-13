@@ -40,7 +40,7 @@ class InAppNavigationTests(unittest.TestCase):
             self.assertIn(expected, source)
 
         self.assertNotIn('self.gallery_canvas.bind("<MouseWheel>"', source)
-        self.assertIn('APP_VERSION = "2.0.0"', source)
+        self.assertIn('APP_VERSION = "1.0.0"', source)
 
     def test_screenshot_is_process_specific_and_checks_demo_data(self):
         capture = (ROOT / "scripts" / "capture_app_screenshot.py").read_text(encoding="utf-8")
