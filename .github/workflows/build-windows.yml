@@ -73,14 +73,14 @@ jobs:
           סריקת OCR והמרת מסמכי Office שולחות לשרת רק את הקובץ שנבחר לפעולה.
           פעולות אלה דורשות חיבור לאינטרנט.
           '@ | Set-Content -Encoding UTF8 "$root/קראו-לפני-הפעלה.txt"
-          Compress-Archive -Path "$root/*" -DestinationPath "dist/ספריית-המתכונים-שלי-Online-Windows.zip" -CompressionLevel Optimal
-          if (!(Test-Path "dist/ספריית-המתכונים-שלי-Online-Windows.zip")) { throw "חבילת ZIP לא נוצרה" }
-          Write-Host "Package bytes: $((Get-Item 'dist/ספריית-המתכונים-שלי-Online-Windows.zip').Length)"
+          Compress-Archive -Path "$root/*" -DestinationPath "dist/recipe-library-hybrid-online-windows.zip" -CompressionLevel Optimal
+          if (!(Test-Path "dist/recipe-library-hybrid-online-windows.zip")) { throw "חבילת ZIP לא נוצרה" }
+          Write-Host "Package bytes: $((Get-Item 'dist/recipe-library-hybrid-online-windows.zip').Length)"
       - name: העלאת חבילת Windows
         uses: actions/upload-artifact@v4
         with:
           name: HamitkonimSheli-Online-Windows
-          path: dist/ספריית-המתכונים-שלי-Online-Windows.zip
+          path: dist/recipe-library-hybrid-online-windows.zip
           if-no-files-found: error
           retention-days: 30
 
@@ -158,22 +158,22 @@ jobs:
           path: release-files
       - name: בדיקת קובץ החבילה
         run: |
-          test -s release-files/ספריית-המתכונים-שלי-Online-Windows.zip
-          ls -lh release-files/ספריית-המתכונים-שלי-Online-Windows.zip
+          test -s release-files/recipe-library-hybrid-online-windows.zip
+          ls -lh release-files/recipe-library-hybrid-online-windows.zip
       - name: פרסום GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.0
-          name: ספריית המתכונים שלי – Hybrid Online 1.0.0
+          tag_name: v1.1.0
+          name: ספריית המתכונים שלי – Hybrid Online 1.1.0
           target_commitish: main
           draft: false
           prerelease: false
           overwrite_files: true
           generate_release_notes: false
           body: |
-            גרסת Windows היברידית: ספריית המתכונים נשמרת מקומית במחשב, ופעולות OCR והמרת Office מתבצעות דרך שירות עיבוד מקוון.
+            גרסת Windows היברידית 1.1.0.
 
-            **הורדה:** חלצו את קובץ ה-ZIP והפעילו את קובץ ה-EXE.
+            **שיפורים:** מצב מקומי ברור ללא שרת מוגדר, שחזור גיבויים ששומר על מבנה התיקיות, יצירת גיבוי אטומית, הגבלת גודל תשובות וקבצים שנשלחים לשירות, ושם קובץ הורדה תקין.
 
-            **חשוב:** יש לפרוס את שירות העיבוד לפי README.md, לוודא שהכתובת נגישה ולבדוק אותה מתוך נטפרי לפני שימוש בסריקה ובהמרת Office.
-          files: release-files/ספריית-המתכונים-שלי-Online-Windows.zip
+            **חשוב:** אין שרת עיבוד ציבורי שמסופק עם גרסה זו. ניהול הספרייה המקומית זמין גם ללא אינטרנט; OCR והמרת Office דורשים כתובת של שירות עיבוד פעיל.
+          files: release-files/recipe-library-hybrid-online-windows.zip

@@ -642,6 +642,58 @@ class בדיקותספרייה(unittest.TestCase):
             else:
                 os.environ["LOCALAPPDATA"] = previous
 
+    def test_שחזור_גיבוי_שומר_תיקיות_ומבדיל_קבצים_בעלי_אותו_שם(self):
+        previous = os.environ.get("LOCALAPPDATA")
+        try:
+            with tempfile.TemporaryDirectory() as temp:
+                os.environ["LOCALAPPDATA"] = str(Path(temp) / "profile")
+                source_root = Path(temp) / "sources"
+                breakfast = source_root / "morning" / "recipe.txt"
+                dinner = source_root / "evening" / "recipe.txt"
+                breakfast.parent.mkdir(parents=True)
+                dinner.parent.mkdir(parents=True)
+                breakfast.write_text(
+                    "מרק\nמצרכים:\nגזר\nאופן ההכנה:\nמבשלים",
+                    encoding="utf-8",
+                )
+                dinner.write_text(
+                    "מרק\nמצרכים:\nעדשים\nאופן ההכנה:\nמבשלים",
+                    encoding="utf-8",
+                )
+
+                library = app.RecipeLibrary()
+                self.assertTrue(library.import_one(breakfast, "ארוחות/בוקר")[0])
+                self.assertTrue(library.import_one(dinner, "ארוחות/ערב")[0])
+                backup = Path(temp) / "nested-backup.zip"
+                library.create_backup(backup)
+
+                library.db.execute("DELETE FROM items")
+                library.db.commit()
+                restored_count = library.restore_backup(backup)
+                self.assertEqual(restored_count, 2)
+
+                by_folder = {}
+                for row in library.rows():
+                    data = library.get_recipe_data(int(row["id"]))
+                    by_folder[data["source_folder"]] = Path(row["stored_path"])
+
+                self.assertEqual(
+                    by_folder["ארוחות/בוקר"].relative_to(library.files_dir).as_posix(),
+                    "ארוחות/בוקר/מרק.txt",
+                )
+                self.assertEqual(
+                    by_folder["ארוחות/ערב"].relative_to(library.files_dir).as_posix(),
+                    "ארוחות/ערב/מרק.txt",
+                )
+                self.assertIn("גזר", by_folder["ארוחות/בוקר"].read_text(encoding="utf-8"))
+                self.assertIn("עדשים", by_folder["ארוחות/ערב"].read_text(encoding="utf-8"))
+                library.db.close()
+        finally:
+            if previous is None:
+                os.environ.pop("LOCALAPPDATA", None)
+            else:
+                os.environ["LOCALAPPDATA"] = previous
+
     def test_בדיקת_דמיון_תוכן_לזיהוי_כפילויות(self):
         first = "עוגת תפוחים עם קינמון: קמח, ביצים, תפוחים וסוכר. אופים בתנור."
         second = "עוגת תפוחים קינמון: מערבבים קמח, ביצים, תפוחים וסוכר ואופים בתנור."

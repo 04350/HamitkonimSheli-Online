@@ -62,7 +62,7 @@ except Exception:
     pytesseract = None
 
 APP_NAME = "ספריית המתכונים שלי"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 def _rounded_points(x1, y1, x2, y2, radius=14, steps=8):
     """Create a polygon outline with smooth rounded corners."""
     width = max(1, x2 - x1)
@@ -1080,21 +1080,39 @@ class RecipeLibrary:
         return str(row["value"]) if row else str(default)
 
     def create_backup(self, target: Path):
+        """Create a complete ZIP snapshot and replace the destination only after success."""
         target = Path(target)
         target.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix="recipe-backup-") as temp:
-            db_copy = Path(temp) / "library.sqlite3"
-            backup_db = sqlite3.connect(db_copy)
-            try:
-                self.db.commit()
-                self.db.backup(backup_db)
-            finally:
-                backup_db.close()
-            with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
-                archive.write(db_copy, "הספרייה.sqlite3")
-                for path in self.files_dir.rglob("*"):
-                    if path.is_file():
-                        archive.write(path, "הקבצים שלי/" + path.relative_to(self.files_dir).as_posix())
+        with tempfile.NamedTemporaryFile(
+            prefix=".recipe-backup-", suffix=".tmp", dir=target.parent, delete=False
+        ) as handle:
+            temporary_target = Path(handle.name)
+        try:
+            with tempfile.TemporaryDirectory(prefix="recipe-backup-") as temp:
+                db_copy = Path(temp) / "library.sqlite3"
+                backup_db = sqlite3.connect(db_copy)
+                try:
+                    self.db.commit()
+                    self.db.backup(backup_db)
+                finally:
+                    backup_db.close()
+                target_resolved = target.resolve()
+                temporary_resolved = temporary_target.resolve()
+                with zipfile.ZipFile(temporary_target, "w", zipfile.ZIP_DEFLATED) as archive:
+                    archive.write(db_copy, "הספרייה.sqlite3")
+                    for path in self.files_dir.rglob("*"):
+                        if not path.is_file() or path.is_symlink():
+                            continue
+                        resolved = path.resolve()
+                        if resolved in (target_resolved, temporary_resolved):
+                            continue
+                        archive.write(
+                            path,
+                            "הקבצים שלי/" + path.relative_to(self.files_dir).as_posix(),
+                        )
+            os.replace(temporary_target, target)
+        finally:
+            temporary_target.unlink(missing_ok=True)
 
     def restore_backup(self, source: Path) -> int:
         source = Path(source)
@@ -1149,13 +1167,57 @@ class RecipeLibrary:
             if not check_db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='items'").fetchone():
                 check_db.close()
                 raise ValueError("הקובץ אינו גיבוי של ספריית המתכונים.")
-            rows = check_db.execute("SELECT id,stored_path FROM items").fetchall()
+            rows = check_db.execute("SELECT id,stored_path,digest FROM items").fetchall()
+            extracted_by_name: dict[str, list[Path]] = {}
+            for restored_path in extracted_files.rglob("*"):
+                if restored_path.is_file():
+                    extracted_by_name.setdefault(restored_path.name.casefold(), []).append(restored_path)
+
             for row in rows:
-                filename = Path(str(row["stored_path"])).name
-                if filename and (extracted_files / filename).is_file():
+                stored_value = str(row["stored_path"] or "")
+                normalized_parts = [part for part in stored_value.replace("\\", "/").split("/") if part]
+                relative_parts: list[str] = []
+                try:
+                    marker_index = len(normalized_parts) - 1 - normalized_parts[::-1].index("הקבצים שלי")
+                    relative_parts = normalized_parts[marker_index + 1:]
+                except ValueError:
+                    pass
+
+                candidate = None
+                if relative_parts:
+                    relative_candidate = extracted_files.joinpath(*relative_parts)
+                    try:
+                        if relative_candidate.is_file() and relative_candidate.resolve().is_relative_to(extracted_files.resolve()):
+                            candidate = relative_candidate
+                    except OSError:
+                        candidate = None
+
+                filename = Path(stored_value.replace("\\", "/")).name
+                if candidate is None and filename:
+                    matches = extracted_by_name.get(filename.casefold(), [])
+                    if len(matches) == 1:
+                        candidate = matches[0]
+                    elif len(matches) > 1:
+                        # Legacy backups may contain absolute paths from another profile.
+                        # When the relative folder is unavailable, use the file digest to
+                        # disambiguate files that share the same filename.
+                        digest = str(row["digest"] or "")
+                        digest_matches = []
+                        for match in matches:
+                            try:
+                                if file_digest(match) == digest:
+                                    digest_matches.append(match)
+                            except OSError:
+                                continue
+                        if len(digest_matches) == 1:
+                            candidate = digest_matches[0]
+
+                if candidate is not None:
+                    relative = candidate.relative_to(extracted_files)
+                    restored_path = self.files_dir.joinpath(*relative.parts)
                     check_db.execute(
                         "UPDATE items SET stored_path=? WHERE id=?",
-                        (str(self.files_dir / filename), int(row["id"]))
+                        (str(restored_path), int(row["id"]))
                     )
             check_db.commit()
             check_db.close()
@@ -1373,7 +1435,8 @@ class App:
         try:
             set_api_base_url(self.library.get_setting("cloud_api_url", DEFAULT_CLOUD_API_URL))
         except ValueError:
-            set_api_base_url(DEFAULT_CLOUD_API_URL)
+            # A stale or malformed saved URL must never prevent local use.
+            set_api_base_url("")
         self.root = ROOT_CLASS()
         self.root.title(f"{APP_NAME} – גרסה {APP_VERSION}")
         try:
@@ -4475,8 +4538,15 @@ class App:
         theme_var = tk.StringVar(value=self.library.get_setting("color_theme", "שמנת"))
         font_var = tk.StringVar(value=self.library.get_setting("font_size", "10"))
         zoom_var = tk.StringVar(value=self.library.get_setting("preview_zoom", "1.0"))
-        cloud_url_var = tk.StringVar(value=self.library.get_setting("cloud_api_url", get_api_base_url() or DEFAULT_CLOUD_API_URL))
-        cloud_status_var = tk.StringVar(value="OCR והמרת Office מתבצעים בשרת; המתכונים נשמרים במחשב.")
+        cloud_url_var = tk.StringVar(value=self.library.get_setting("cloud_api_url", DEFAULT_CLOUD_API_URL))
+        cloud_status_var = tk.StringVar(
+            value=(
+                "לא הוגדר שרת עיבוד. אפשר לנהל את הספרייה המקומית כרגיל; "
+                "סריקת OCR והמרת Office יפעלו לאחר הגדרת שירות עיבוד פעיל."
+                if not cloud_url_var.get().strip()
+                else "כתובת שרת העיבוד נשמרה. לחצו על ״בדיקת חיבור״ כדי לוודא שהשירות זמין."
+            )
+        )
         auto_var = tk.BooleanVar(value=self.library.get_setting("auto_backup_enabled", "0") == "1")
         days_var = tk.StringVar(value=self.library.get_setting("auto_backup_days", "7"))
 
@@ -4521,6 +4591,12 @@ class App:
             except ValueError as exc:
                 cloud_status_var.set(str(exc))
                 return
+            if not url:
+                cloud_status_var.set(
+                    "לא הוגדרה כתובת שרת. התוכנה ממשיכה לעבוד מקומית; "
+                    "OCR והמרת Office אינם זמינים עד להגדרת שרת פעיל."
+                )
+                return
             cloud_status_var.set("בודק את השרת…")
             def worker():
                 try:
@@ -4550,15 +4626,16 @@ class App:
             except ValueError:
                 messagebox.showwarning("הגדרות", "אחד הערכים אינו תקין.", parent=dialog)
                 return
-            self.library.set_setting("color_theme", theme_var.get())
-            self.library.set_setting("font_size", str(font))
-            self.library.set_setting("preview_zoom", str(zoom))
             cloud_url = cloud_url_var.get().strip()
             try:
                 set_api_base_url(cloud_url)
             except ValueError as exc:
                 messagebox.showwarning("שירות עיבוד מקוון", str(exc), parent=dialog)
                 return
+            # Validate every setting before writing any of them.
+            self.library.set_setting("color_theme", theme_var.get())
+            self.library.set_setting("font_size", str(font))
+            self.library.set_setting("preview_zoom", str(zoom))
             self.library.set_setting("cloud_api_url", cloud_url)
             was_enabled = self.library.get_setting("auto_backup_enabled", "0") == "1"
             self.library.set_setting("auto_backup_enabled", "1" if auto_var.get() else "0")
